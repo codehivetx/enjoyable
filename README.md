@@ -37,6 +37,11 @@ To open this pane on your Mac, choose Apple menu > System Preferences, click Sec
 * Mac OS X 27+ (thus Apple Silicon)
 * One or more HID-compatible (e.g. USB or Bluetooth) input devices
 
+## Building
+
+Open `Enjoyable.xcodeproj` in Xcode and build the `Enjoyable` target
+(press ⌘B in Xcode). The app runs on macOS 27+.
+
 ## License
 
 Copyright 2026 Code Hive Tx, LLC
