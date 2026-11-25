@@ -19,6 +19,8 @@ Enjoyable is free software written by Joe Wreschnig and is based on
 the Enjoy codebase written by [Yifeng Huang](http://nongraphical.com)
 and [Sam McCall](http://abstractable.net/enjoy/).  It has been trivially modernized and modestly enhanced by Shawn Allen, to better support MFi controllers.
 
+[Steven R. Loomis](https://srl295.github.io) (Code Hive Tx, LLC) made an agentic update to macOS 27 and aarch64.
+
 ## How to Use
 
 To start, just press a button on your joystick or gamepad, then press
@@ -32,12 +34,13 @@ To open this pane on your Mac, choose Apple menu > System Preferences, click Sec
 
 ## Requirements
 
-* Mac OS X 10.7+
+* Mac OS X 27+ (thus Apple Silicon)
 * One or more HID-compatible (e.g. USB or Bluetooth) input devices
 
 ## License
 
-Copyright 2013 Joe Wreschnig  
+Copyright 2026 Code Hive Tx, LLC
+          2013 Joe Wreschnig  
           2012 Yifeng Huang  
           2009 Sam McCall, University of Otago
 
