@@ -11,7 +11,7 @@
 #import "NJOutput.h"
 #import "NJEvents.h"
 
-#import <CoreVideo/CoreVideo.h>
+#import <QuartzCore/CADisplayLink.h>
 
 @interface NJInputController ()
 
@@ -19,46 +19,33 @@
 
 @end
 
-static CVReturn _updateDL(CVDisplayLinkRef displayLink,
-                          const CVTimeStamp *inNow,
-                          const CVTimeStamp *inOutputTime,
-                          CVOptionFlags flagsIn,
-                          CVOptionFlags *flagsOut,
-                          void *ctxManager) {
-    NJInputController *manager = (__bridge NJInputController *)ctxManager;
-    [manager performSelectorOnMainThread:@selector(updateContinuousOutputs)
-                              withObject:nil
-                           waitUntilDone:NO];
-    return kCVReturnSuccess;
-}
-
 @implementation NJInputController {
     NJHIDManager *_HIDManager;
     NSMutableArray *_continousOutputs;
     NSMutableArray *_devices;
     NSMutableArray *_mappings;
     NJMapping *_manualMapping;
-    CVDisplayLinkRef _displayLink;
+    CADisplayLink *_displayLink;
 }
 
 #define NSSTR(e) ((NSString *)CFSTR(e))
+
+- (void)displayLinkFired:(CADisplayLink *)sender {
+    [self performSelectorOnMainThread:@selector(updateContinuousOutputs)
+                              withObject:nil
+                           waitUntilDone:NO];
+}
 
 - (id)init {
     if ((self = [super init])) {
         _devices = [[NSMutableArray alloc] initWithCapacity:16];
         _continousOutputs = [[NSMutableArray alloc] initWithCapacity:32];
 
-        CVReturn cvErr = CVDisplayLinkCreateWithActiveCGDisplays(&_displayLink);
-        if (cvErr) {
-            NSError *error = [NSError errorWithDomain:NSCocoaErrorDomain
-                                                 code:cvErr
-                                             userInfo:nil];
-            [self.delegate inputController:self didError:error];
-            NSLog(@"DisplayLink failed creation with error: %@", error);
-            _displayLink = NULL;
-        }
-        CVDisplayLinkSetOutputCallback(_displayLink, _updateDL, (__bridge void *)self);
-        
+        // Modern replacement for CVDisplayLinkCreateWithActiveCGDisplays:
+        // ask the main screen for a display link bound to it.
+        _displayLink = [NSScreen.mainScreen displayLinkWithTarget:self
+                                                          selector:@selector(displayLinkFired:)];
+
         _HIDManager = [[NJHIDManager alloc] initWithCriteria:@[
                        @{ NSSTR(kIOHIDDeviceUsagePageKey) : @(kHIDPage_GenericDesktop),
                        NSSTR(kIOHIDDeviceUsageKey) : @(kHIDUsage_GD_Joystick) },
@@ -100,10 +87,7 @@ static CVReturn _updateDL(CVDisplayLinkRef displayLink,
 
 - (void)dealloc {
     [NSNotificationCenter.defaultCenter removeObserver:self];
-    if (_displayLink) {
-        CVDisplayLinkStop(_displayLink);
-        CVDisplayLinkRelease(_displayLink);
-    }
+    [_displayLink invalidate];
 }
 
 - (void)addRunningOutput:(NJOutput *)output {
@@ -111,8 +95,8 @@ static CVReturn _updateDL(CVDisplayLinkRef displayLink,
     // re-adding them or they trigger multiple times each time.
     if (![_continousOutputs containsObject:output])
         [_continousOutputs addObject:output];
-    if (_displayLink && !CVDisplayLinkIsRunning(_displayLink))
-        CVDisplayLinkStart(_displayLink);
+    if (_displayLink)
+        _displayLink.paused = NO;
 }
 
 - (void)runOutputForValue:(IOHIDValueRef)value {
@@ -194,16 +178,15 @@ static CVReturn _updateDL(CVDisplayLinkRef displayLink,
             [_continousOutputs removeObject:output];
         }
     }
-    if (!_continousOutputs.count && _displayLink) {
-        CVDisplayLinkStop(_displayLink);
-    }
+    if (!_continousOutputs.count && _displayLink)
+        _displayLink.paused = YES;
 }
 
 - (void)HIDManager:(NJHIDManager *)manager didError:(NSError *)error {
     [self.delegate inputController:self didError:error];
     self.simulatingEvents = NO;
     if (_displayLink)
-        CVDisplayLinkStop(_displayLink);
+        _displayLink.paused = YES;
 }
 
 - (void)HIDManagerDidStart:(NJHIDManager *)manager {
@@ -213,7 +196,7 @@ static CVReturn _updateDL(CVDisplayLinkRef displayLink,
 - (void)HIDManagerDidStop:(NJHIDManager *)manager {
     [_devices removeAllObjects];
     if (_displayLink)
-        CVDisplayLinkStop(_displayLink);
+        _displayLink.paused = YES;
     [self.delegate inputControllerDidStopHID:self];
 }
 

@@ -8,82 +8,47 @@
 
 #import "NSRunningApplication+LoginItem.h"
 
-#import <CoreServices/CoreServices.h>
+#import <ServiceManagement/ServiceManagement.h>
+#include <libproc.h>
+#include <string.h>
+#include <sys/proc_info.h>
+#include <unistd.h>
 
-static const UInt32 RESOLVE_FLAGS = kLSSharedFileListNoUserInteraction
-                                  | kLSSharedFileListDoNotMountVolumes;
+// Executable name of the login window, which launches apps when logging in.
+static const char *const kLoginWindowProcessName = "loginwindow";
 
 @implementation NSRunningApplication (LoginItem)
 
 - (BOOL)isLoginItem {
-    LSSharedFileListRef loginItems = LSSharedFileListCreate(
-        NULL, kLSSharedFileListSessionLoginItems, NULL);
-    NSURL *myURL = self.bundleURL;
-	BOOL found = NO;
-    UInt32 seed = 0;
-    NSArray *currentLoginItems = CFBridgingRelease(
-        LSSharedFileListCopySnapshot(loginItems, &seed));
-    for (id obj in currentLoginItems) {
-        LSSharedFileListItemRef item = (__bridge LSSharedFileListItemRef)obj;
-        CFURLRef itemURL = NULL;
-        if (!LSSharedFileListItemResolve(item, RESOLVE_FLAGS, &itemURL, NULL)) {
-            found = CFEqual(itemURL, (__bridge CFURLRef)myURL);
-            CFRelease(itemURL);
-        }
-        if (found)
-            break;
-    }
-    CFRelease(loginItems);
-	return found;
+    return [SMAppService mainAppService].status == SMAppServiceStatusEnabled;
 }
 
 - (void)addToLoginItems {
     if (!self.isLoginItem) {
-        NSURL *myURL = self.bundleURL;
-        LSSharedFileListRef loginItems = LSSharedFileListCreate(
-            NULL, kLSSharedFileListSessionLoginItems, NULL);
-        LSSharedFileListInsertItemURL(
-            loginItems, kLSSharedFileListItemBeforeFirst,
-            NULL, NULL, (__bridge CFURLRef)myURL, NULL, NULL);
-        CFRelease(loginItems);
+        NSError *error = nil;
+        [[SMAppService mainAppService] registerAndReturnError:&error];
     }
 }
 
 - (void)removeFromLoginItems {
-    LSSharedFileListRef loginItems = LSSharedFileListCreate(
-        NULL, kLSSharedFileListSessionLoginItems, NULL);
-    NSURL *myURL = self.bundleURL;
-    UInt32 seed = 0;
-    NSArray *currentLoginItems = CFBridgingRelease(
-        LSSharedFileListCopySnapshot(loginItems, &seed));
-    for (id obj in currentLoginItems) {
-        LSSharedFileListItemRef item = (__bridge LSSharedFileListItemRef)obj;
-        CFURLRef itemURL = NULL;
-        if (!LSSharedFileListItemResolve(item, RESOLVE_FLAGS, &itemURL, NULL)) {
-            if (CFEqual(itemURL, (__bridge CFURLRef)myURL))
-                LSSharedFileListItemRemove(loginItems, item);
-            CFRelease(itemURL);
-        }
-    }
-    CFRelease(loginItems);
+    NSError *error = nil;
+    [[SMAppService mainAppService] unregisterAndReturnError:&error];
 }
 
 - (BOOL)wasLaunchedAsLoginItemOrResume {
-    ProcessSerialNumber psn = { 0, kCurrentProcess };
-    NSDictionary *processInfo = CFBridgingRelease(
-        ProcessInformationCopyDictionary(
-            &psn, kProcessDictionaryIncludeAllInformationMask));
-    long long parent = [processInfo[@"ParentPSN"] longLongValue];
-    ProcessSerialNumber parentPsn = {
-        (parent >> 32) & 0x00000000FFFFFFFFLL,
-        parent & 0x00000000FFFFFFFFLL
-    };
-    
-    NSDictionary *parentInfo = CFBridgingRelease(
-        ProcessInformationCopyDictionary(
-            &parentPsn, kProcessDictionaryIncludeAllInformationMask));
-    return [parentInfo[@"FileCreator"] isEqualToString:@"lgnw"];
+    // Modern replacement for the deprecated ProcessInformationCopyDictionary:
+    // ask the kernel via proc_pidinfo for this process's parent and check
+    // whether it is the login window.
+    struct proc_bsdinfo info = {0};
+    if (proc_pidinfo(getpid(), PROC_PIDTBSDINFO, 0, &info, sizeof(info)) <= 0)
+        return NO;
+    const pid_t parent = (pid_t)info.pbi_ppid;
+    if (parent <= 0)
+        return NO;
+    char parentName[32] = {0};
+    if (proc_name(parent, parentName, sizeof(parentName)) <= 0)
+        return NO;
+    return strcmp(parentName, kLoginWindowProcessName) == 0;
 }
-
 
 @end

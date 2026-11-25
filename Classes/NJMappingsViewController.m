@@ -12,11 +12,16 @@
 
 #define PB_ROW @"com.yukkurigames.Enjoyable.MappingRow"
 
+// Modern replacement for the deprecated NSFilesPromisePboardType.
+static NSString *const kFileURLPromiseType = (__bridge NSString *)kPasteboardTypeFileURLPromise;
+
 
 @implementation NJMappingsViewController
 
 - (void)awakeFromNib {
-    [self.mappingList registerForDraggedTypes:@[PB_ROW, NSURLPboardType]];
+    NSArray *types = [@[PB_ROW, NSPasteboardTypeURL]
+                      arrayByAddingObjectsFromArray:NSFilePromiseReceiver.readableDraggedTypes];
+    [self.mappingList registerForDraggedTypes:types];
     [self.mappingList setDraggingSourceOperationMask:NSDragOperationCopy forLocal:NO];
 }
 
@@ -56,15 +61,15 @@
     [self.mappingListPopover showRelativeToRect:self.mappingListTrigger.bounds
                                          ofView:self.mappingListTrigger
                                   preferredEdge:NSMinXEdge];
-    self.mappingListTrigger.state = NSOnState;
+    self.mappingListTrigger.state = NSControlStateValueOn;
 }
 
 - (void)popoverWillShow:(NSNotification *)notification {
-    self.mappingListTrigger.state = NSOnState;
+    self.mappingListTrigger.state = NSControlStateValueOn;
 }
 
 - (void)popoverWillClose:(NSNotification *)notification {
-    self.mappingListTrigger.state = NSOffState;
+    self.mappingListTrigger.state = NSControlStateValueOff;
 }
 
 - (void)beginUpdates {
@@ -147,7 +152,7 @@
                          moveMappingFromIndex:srcRow
                                       toIndex:row];
         return YES;
-    } else if ([pboard.types containsObject:NSURLPboardType]) {
+    } else if ([pboard.types containsObject:NSPasteboardTypeURL]) {
         NSURL *url = [NSURL URLFromPasteboard:pboard];
         NSError *error;
         if (![self.delegate mappingsViewController:self
@@ -159,6 +164,35 @@
         } else {
             return YES;
         }
+    } else if ([pboard.types containsObject:kFileURLPromiseType]) {
+        // Fulfill file promises with the modern receiver API; the reader
+        // block writes each promised file.
+        NSArray<NSFilePromiseReceiver *> *receivers =
+            [pboard readObjectsForClasses:@[NSFilePromiseReceiver.class] options:0];
+        for (NSFilePromiseReceiver *receiver in receivers) {
+            NJMapping *mapping = [self.delegate mappingsViewController:self
+                                                     mappingForIndex:row];
+            NSString *filename =
+                [[mapping.name stringByFixingPathComponent]
+                 stringByAppendingPathExtension:@"enjoyable"];
+            NSURL *dst = [NSFileManager.defaultManager.temporaryDirectory
+                          URLByAppendingPathComponent:filename];
+            dst = [NSFileManager.defaultManager generateUniqueURLWithBase:dst];
+            [receiver receivePromisedFilesAtDestination:[dst URLByDeletingLastPathComponent]
+                                                 options:@{}
+                                          operationQueue:NSOperationQueue.mainQueue
+                                                  reader:^(NSURL *fileURL, NSError *errorOrNil) {
+                NSError *error;
+                if (!fileURL || errorOrNil) {
+                    if (errorOrNil)
+                        [tableView presentError:errorOrNil];
+                    return;
+                }
+                if (![mapping writeToURL:fileURL error:&error])
+                    [tableView presentError:error];
+            }];
+        }
+        return YES;
     } else {
         return NO;
     }
@@ -172,7 +206,7 @@
     if ([pboard.types containsObject:PB_ROW]) {
         [tableView setDropRow:MAX(1, row) dropOperation:NSTableViewDropAbove];
         return NSDragOperationMove;
-    } else if ([pboard.types containsObject:NSURLPboardType]) {
+    } else if ([pboard.types containsObject:NSPasteboardTypeURL]) {
         NSURL *url = [NSURL URLFromPasteboard:pboard];
         if ([url.pathExtension isEqualToString:@"enjoyable"]) {
             [tableView setDropRow:MAX(1, row) dropOperation:NSTableViewDropAbove];
@@ -185,39 +219,13 @@
     }
 }
 
-- (NSArray *)tableView:(NSTableView *)tableView
-namesOfPromisedFilesDroppedAtDestination:(NSURL *)dropDestination
-forDraggedRowsWithIndexes:(NSIndexSet *)indexSet {
-    NJMapping *toSave = [self.delegate mappingsViewController:self
-                                              mappingForIndex:indexSet.firstIndex];
-    NSString *filename = [[toSave.name stringByFixingPathComponent]
-                          stringByAppendingPathExtension:@"enjoyable"];
-    NSURL *dst = [dropDestination URLByAppendingPathComponent:filename];
-    dst = [NSFileManager.defaultManager generateUniqueURLWithBase:dst];
-    NSError *error;
-    if (![toSave writeToURL:dst error:&error]) {
-        [tableView presentError:error];
-        return @[];
-    } else {
-        return @[dst.lastPathComponent];
-    }
-}
-
-- (BOOL)tableView:(NSTableView *)tableView
-writeRowsWithIndexes:(NSIndexSet *)rowIndexes
-     toPasteboard:(NSPasteboard *)pboard {
-    if (rowIndexes.count == 1 && rowIndexes.firstIndex != 0) {
-        [pboard declareTypes:@[PB_ROW, NSFilesPromisePboardType] owner:nil];
-        [pboard setString:@(rowIndexes.firstIndex).stringValue forType:PB_ROW];
-        [pboard setPropertyList:@[@"enjoyable"] forType:NSFilesPromisePboardType];
-        return YES;
-    } else if (rowIndexes.count == 1 && rowIndexes.firstIndex == 0) {
-        [pboard declareTypes:@[NSFilesPromisePboardType] owner:nil];
-        [pboard setPropertyList:@[@"enjoyable"] forType:NSFilesPromisePboardType];
-        return YES;
-    } else {
-        return NO;
-    }
+- (id <NSPasteboardWriting>)tableView:(NSTableView *)tableView
+                       pasteboardWriterForRow:(NSInteger)row {
+    NSPasteboardItem *item = [[NSPasteboardItem alloc] init];
+    if (row != 0)
+        [item setString:@(row).stringValue forType:PB_ROW];
+    [item setPropertyList:@[@"enjoyable"] forType:kFileURLPromiseType];
+    return item;
 }
 
 - (void)reloadData {

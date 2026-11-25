@@ -33,7 +33,7 @@ static const CFIndex kMFiAnalogButtonInputMaxThreshold = 10;
 
 - (void)notifyEvent:(IOHIDValueRef)value {
     self.active = IOHIDValueGetIntegerValue(value) >= _max;
-    self.magnitude = IOHIDValueGetIntegerValue(value) / (float)_max;
+    self.magnitude = (float)IOHIDValueGetIntegerValue(value) / (float)_max;
 }
 
 @end

@@ -7,6 +7,8 @@
 
 #import "EnjoyableApplicationDelegate.h"
 
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+
 #import "NJMapping.h"
 #import "NJInput.h"
 #import "NJEvents.h"
@@ -46,8 +48,7 @@
       self.ic.currentMapping]];
 
     statusItem = [NSStatusBar.systemStatusBar statusItemWithLength:36];
-    statusItem.image = [NSImage imageNamed:@"Status Menu Icon Disabled"];
-    statusItem.highlightMode = YES;
+    statusItem.button.image = [NSImage imageNamed:@"Status Menu Icon Disabled"];
     statusItem.menu = self.statusItemMenu;
     statusItem.target = self;
 }
@@ -89,10 +90,10 @@
 }
 
 - (void)flashStatusItem {
-    if ([statusItem.image.name isEqualToString:@"Status Menu Icon"]) {
-        statusItem.image = [NSImage imageNamed:@"Status Menu Icon Disabled"];
+    if ([statusItem.button.image.name isEqualToString:@"Status Menu Icon"]) {
+        statusItem.button.image = [NSImage imageNamed:@"Status Menu Icon Disabled"];
     } else {
-        statusItem.image = [NSImage imageNamed:@"Status Menu Icon"];
+        statusItem.button.image = [NSImage imageNamed:@"Status Menu Icon"];
     }
     
 }
@@ -108,8 +109,8 @@
 }
 
 - (void)eventSimulationStarted:(NSNotification *)note {
-    self.simulatingEventsButton.state = NSOnState;
-    statusItem.image = [NSImage imageNamed:@"Status Menu Icon"];
+    self.simulatingEventsButton.state = NSControlStateValueOn;
+    statusItem.button.image = [NSImage imageNamed:@"Status Menu Icon"];
     [NSProcessInfo.processInfo
         disableAutomaticTermination:@"Event simulation running."];
     [NSWorkspace.sharedWorkspace.notificationCenter
@@ -120,8 +121,8 @@
 }
 
 - (void)eventSimulationStopped:(NSNotification *)note {
-    self.simulatingEventsButton.state = NSOffState;
-    statusItem.image = [NSImage imageNamed:@"Status Menu Icon Disabled"];
+    self.simulatingEventsButton.state = NSControlStateValueOff;
+    statusItem.button.image = [NSImage imageNamed:@"Status Menu Icon Disabled"];
     [NSProcessInfo.processInfo
         enableAutomaticTermination:@"Event simulation running."];
     [NSWorkspace.sharedWorkspace.notificationCenter
@@ -205,10 +206,14 @@
 
 - (void)importMappingClicked:(id)sender {
     NSOpenPanel *panel = [NSOpenPanel openPanel];
-    panel.allowedFileTypes = @[ @"enjoyable", @"json", @"txt" ];
+    panel.allowedContentTypes = @[
+        [UTType typeWithFilenameExtension:@"enjoyable"],
+        [UTType typeWithFilenameExtension:@"json"],
+        [UTType typeWithFilenameExtension:@"txt"],
+    ];
     [panel beginSheetModalForWindow:self.window
                   completionHandler:^(NSInteger result) {
-                      if (result != NSFileHandlingPanelOKButton)
+                      if (result != NSModalResponseOK)
                           return;
                       [panel close];
                       NSError *error;
@@ -229,12 +234,12 @@
 
 - (void)exportMappingClicked:(id)sender {
     NSSavePanel *panel = [NSSavePanel savePanel];
-    panel.allowedFileTypes = @[ @"enjoyable" ];
+    panel.allowedContentTypes = @[ [UTType typeWithFilenameExtension:@"enjoyable"] ];
     NJMapping *mapping = self.ic.currentMapping;
     panel.nameFieldStringValue = [mapping.name stringByFixingPathComponent];
     [panel beginSheetModalForWindow:self.window
                   completionHandler:^(NSInteger result) {
-                      if (result != NSFileHandlingPanelOKButton)
+                      if (result != NSModalResponseOK)
                           return;
                       [panel close];
                       NSError *error;
@@ -282,11 +287,14 @@
     [conflictAlert addButtonWithTitle:NSLocalizedString(@"cancel import", @"button to cancel import")];
     [conflictAlert addButtonWithTitle:NSLocalizedString(@"import new mapping", @"button to import as new mapping")];
     [conflictAlert beginSheetModalForWindow:self.window
-                              modalDelegate:self
-                             didEndSelector:@selector(mappingConflictDidResolve:returnCode:contextInfo:)
-                                contextInfo:(void *)CFBridgingRetain(@{ @"index": @(idx),
-                                                                        @"old mapping": mergeInto,
-                                                                        @"new mapping": mapping })];
+                           completionHandler:^(NSInteger result) {
+                               NSDictionary *userInfo = @{ @"index": @(idx),
+                                                           @"old mapping": mergeInto,
+                                                           @"new mapping": mapping };
+                               [self mappingConflictDidResolve:conflictAlert
+                                                    returnCode:result
+                                                   contextInfo:(void *)CFBridgingRetain(userInfo)];
+                           }];
 }
 
 - (NSInteger)numberOfMappings:(NJMappingsViewController *)mvc {
@@ -433,7 +441,7 @@
 }
 
 - (IBAction)simulatingEventsChanged:(NSButton *)sender {
-    self.ic.simulatingEvents = sender.state == NSOnState;
+    self.ic.simulatingEvents = sender.state == NSControlStateValueOn;
 }
 
 - (void)outputViewController:(NJOutputViewController *)ovc
